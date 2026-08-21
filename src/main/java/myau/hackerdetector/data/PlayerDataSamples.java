@@ -1,0 +1,179 @@
+package myau.hackerdetector.data;
+
+import myau.hackerdetector.checks.AutoblockCheck;
+import myau.hackerdetector.checks.FastbreakCheck;
+import myau.hackerdetector.checks.GhosthandCheck;
+import myau.hackerdetector.checks.KeepSprintACheck;
+import myau.hackerdetector.checks.KeepSprintBCheck;
+import myau.hackerdetector.checks.KillAuraACheck;
+import myau.hackerdetector.checks.KillAuraBCheck;
+import myau.hackerdetector.checks.NoSlowdownCheck;
+import myau.hackerdetector.checks.ScaffoldCheck;
+import myau.hackerdetector.data.buffers.SampleBufferD;
+import myau.hackerdetector.data.buffers.SampleBufferF;
+import myau.hackerdetector.data.buffers.SampleBufferI;
+import myau.hackerdetector.data.buffers.SampleBufferZ;
+import net.minecraft.entity.player.EntityPlayer;
+import net.minecraft.util.BlockPos;
+import net.minecraft.util.MathHelper;
+import net.minecraft.util.Vec3;
+
+public class PlayerDataSamples {
+    public boolean checkedThisTick;
+    public int onGroundTime;
+    public int airTime;
+    public int sprintTime = 0;
+    public int useItemTime = 0;
+    public int timeEating = 0;
+    public int lastEatTime = 50;
+    public boolean usedItemIsConsumable = false;
+    public boolean hasSwung = false;
+    public final SampleBufferZ swingList = new SampleBufferZ(20);
+    public AttackInfo attackInfo;
+    public final SampleBufferZ attackList = new SampleBufferZ(20);
+    public long lastBreakBlockTime = System.currentTimeMillis();
+    public final SampleBufferF breakTimeRatio = new SampleBufferF(8);
+    public BlockPos blockTouched;
+
+    public final SampleBufferD posXList = new SampleBufferD(10);
+    public final SampleBufferD posYList = new SampleBufferD(10);
+    public final SampleBufferD posZList = new SampleBufferD(10);
+    public final SampleBufferD speedXList = new SampleBufferD(5);
+    public final SampleBufferD speedYList = new SampleBufferD(5);
+    public final SampleBufferD speedZList = new SampleBufferD(5);
+
+    private int serverUpdates;
+    public final SampleBufferI serverUpdatesList = new SampleBufferI(20);
+    public final SampleBufferD serverPosXList = new SampleBufferD(5);
+    public final SampleBufferD serverPosYList = new SampleBufferD(5);
+    public final SampleBufferD serverPosZList = new SampleBufferD(5);
+    public final SampleBufferF serverYawList = new SampleBufferF(5);
+    public final SampleBufferF serverPitchList = new SampleBufferF(5);
+    public final SampleBufferF serverYawHeadList = new SampleBufferF(5);
+
+    public final ViolationLevelTracker autoblockAVL = AutoblockCheck.newVL();
+    public final ViolationLevelTracker fastbreakVL = FastbreakCheck.newVL();
+    public final ViolationLevelTracker ghosthandVL = GhosthandCheck.newVl();
+    public final ViolationLevelTracker keepsprintAVL = KeepSprintACheck.newVL();
+    public final ViolationLevelTracker keepSprintBVL = KeepSprintBCheck.newVL();
+    public final ViolationLevelTracker killAuraAVL = KillAuraACheck.newVL();
+    public final ViolationLevelTracker killAuraBVL = KillAuraBCheck.newVL();
+    public final ViolationLevelTracker noSlowdownVL = NoSlowdownCheck.newVL();
+    public final ViolationLevelTracker scaffoldVL = ScaffoldCheck.newVL();
+
+    public void onTickStart() {
+        this.checkedThisTick = false;
+        this.hasSwung = false;
+        this.attackInfo = null;
+        this.serverUpdates = 0;
+    }
+
+    public void onTick(EntityPlayer player) {
+        this.checkedThisTick = true;
+        this.onGroundTime = player.onGround ? this.onGroundTime + 1 : 0;
+        this.airTime = player.onGround ? 0 : this.airTime + 1;
+        this.sprintTime = player.isSprinting() ? this.sprintTime + 1 : 0;
+        final boolean isUsingItem = player.isEating() && player.getHeldItem() != null && player.getHeldItem().getMaxItemUseDuration() > 0;
+        if (!isUsingItem && this.usedItemIsConsumable && this.useItemTime > 25) {
+            this.lastEatTime = 0;
+        }
+        this.lastEatTime++;
+        if (isUsingItem) {
+            this.usedItemIsConsumable = player.getHeldItem().getMaxItemUseDuration() == 32;
+            this.useItemTime = this.useItemTime + 1;
+            this.timeEating = this.usedItemIsConsumable ? this.timeEating + 1 : 0;
+        } else {
+            this.useItemTime = 0;
+            this.timeEating = 0;
+        }
+        this.swingList.add(this.hasSwung);
+        this.attackList.add(this.hasAttacked());
+        this.posXList.add(player.posX);
+        this.posYList.add(player.posY);
+        this.posZList.add(player.posZ);
+        this.speedXList.add((player.posX - player.lastTickPosX) * 20D);
+        this.speedYList.add((player.posY - player.lastTickPosY) * 20D);
+        this.speedZList.add((player.posZ - player.lastTickPosZ) * 20D);
+        this.serverUpdatesList.add(this.serverUpdates);
+    }
+
+    public void onPostChecks() {
+        if (this.attackInfo != null) {
+            this.attackInfo.target = null;
+        }
+        this.blockTouched = null;
+    }
+
+    public void setPositionAndRotation(double x, double y, double z, float yaw, float pitch) {
+        this.serverUpdates++;
+        this.serverPosXList.add(x);
+        this.serverPosYList.add(y);
+        this.serverPosZList.add(z);
+        this.serverYawList.add(yaw);
+        this.serverPitchList.add(pitch);
+    }
+
+    public void setRotationYawHead(float yawHead) {
+        this.serverYawHeadList.add(yawHead);
+    }
+
+    public boolean hasAttacked() {
+        return this.attackInfo != null && !this.attackInfo.multiTarget;
+    }
+
+    public boolean hasAttackedTarget() {
+        return this.attackInfo != null && !this.attackInfo.multiTarget && this.attackInfo.target != null;
+    }
+
+    public boolean isOnFlatGround() {
+        return Math.abs(serverPosYList.get(0) - serverPosYList.get(1)) < 0.001d
+                && Math.abs(serverPosYList.get(1) - serverPosYList.get(2)) < 0.001d
+                && Math.abs(serverPosYList.get(2) - serverPosYList.get(3)) < 0.001d;
+    }
+
+    public boolean isNotMovingXZ() {
+        return this.speedXList.get(0) == 0D && this.speedZList.get(0) == 0D;
+    }
+
+    public double getSpeedXZ() {
+        final double vx = this.speedXList.get(0);
+        final double vz = this.speedZList.get(0);
+        return Math.sqrt(vx * vx + vz * vz);
+    }
+
+    public double getSpeedXZSq() {
+        final double vx = this.speedXList.get(0);
+        final double vz = this.speedZList.get(0);
+        return vx * vx + vz * vz;
+    }
+
+    public boolean hasServerPostion() {
+        return !this.serverPosXList.isEmpty();
+    }
+
+    public Vec3 getPositionEyesServer(EntityPlayer player) {
+        return new Vec3(this.serverPosXList.get(0), this.serverPosYList.get(0) + (double) player.getEyeHeight(), this.serverPosZList.get(0));
+    }
+
+    public boolean hasLookServer() {
+        return !this.serverPitchList.isEmpty() && !this.serverYawHeadList.isEmpty();
+    }
+
+    public Vec3 getLookServer() {
+        return getVectorForRotation(this.serverPitchList.get(0), this.serverYawHeadList.get(0));
+    }
+
+    public double getMoveLookAngleDiff() {
+        return MathHelper.wrapAngleTo180_double(
+                new Vector2D(this.speedZList.get(0), -this.speedXList.get(0)).getOrientedAngle() - this.serverYawHeadList.get(0)
+        );
+    }
+
+    private static Vec3 getVectorForRotation(float pitch, float yaw) {
+        final float f = MathHelper.cos(-yaw * 0.017453292F - (float) Math.PI);
+        final float f1 = MathHelper.sin(-yaw * 0.017453292F - (float) Math.PI);
+        final float f2 = -MathHelper.cos(-pitch * 0.017453292F);
+        final float f3 = MathHelper.sin(-pitch * 0.017453292F);
+        return new Vec3(f1 * f2, f3, f * f2);
+    }
+}
